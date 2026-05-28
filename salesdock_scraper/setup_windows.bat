@@ -1,6 +1,6 @@
 @echo off
 :: Salesdock Scraper — Windows Setup Script
-:: Run this once before running scraper.py
+:: Run this once before running any scraper script
 
 echo ============================================
 echo  Salesdock Scraper Setup
@@ -15,26 +15,21 @@ if not exist "%EXPORT_DIR%" (
     echo Folder already exists: %EXPORT_DIR%
 )
 
-:: Install Python packages
+:: Install Python packages (no browser drivers needed)
 echo.
 echo Installing Python packages...
-pip install playwright gspread google-auth openpyxl
-
-:: No "playwright install" step needed — the scripts use channel="chrome"
-:: which tells Playwright to use your existing system Chrome installation at:
-::   C:\Program Files\Google\Chrome\Application\chrome.exe
+pip install requests beautifulsoup4 lxml gspread google-auth openpyxl
 
 echo.
 echo ============================================
-echo  Setup complete!
+echo  Setup complete! No browser install needed.
 echo.
-echo IMPORTANT: Before running the scraper,
-echo make sure Chrome is CLOSED completely.
-echo Playwright needs exclusive access to the
-echo Chrome profile.
+echo To run the test (38 transactions):
+echo   python test_scraper.py
+echo   python export_test.py
 echo.
-echo Then run:
-echo   python test_scraper.py   (38-transaction test)
-echo   python scraper.py        (full run)
+echo To run the full scraper:
+echo   python scraper.py
+echo   python export_to_excel.py
 echo ============================================
 pause
