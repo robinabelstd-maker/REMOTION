@@ -1,5 +1,6 @@
+#!C:\Users\robin\AppData\Local\Programs\Python\Python314\python.exe
 """
-TEST RUN — scrapes 100 transactions starting from page 140, going backwards.
+TEST RUN — scrapes 38 transactions starting from page 140, going backwards.
 Saves to Desktop/salesdock_export/test_progress.json (separate from main run).
 Run export_test.py afterwards to produce test_export.xlsx.
 """
@@ -25,7 +26,7 @@ LIST_URL = f"{BASE_URL}/transactions/view/all"
 DETAIL_URL = f"{BASE_URL}/sales/{{id}}"
 
 START_PAGE = 140        # begin here, count down to page 1
-TEST_LIMIT = 100        # stop after this many transactions
+TEST_LIMIT = 38         # stop after this many transactions
 
 RETRY_COUNT = 3
 RETRY_WAIT = 5
