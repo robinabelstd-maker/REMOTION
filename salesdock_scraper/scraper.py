@@ -32,8 +32,8 @@ TOTAL_APPROX = 28_000
 SAVE_INTERVAL = 50
 RETRY_COUNT = 3
 RETRY_WAIT = 5          # seconds between retries
-MIN_DELAY = 1.5         # minimum delay between detail pages
-MAX_DELAY = 3.0         # maximum delay between detail pages
+MIN_DELAY = 3.0         # minimum delay between detail pages
+MAX_DELAY = 7.0         # maximum delay between detail pages
 PAGE_TIMEOUT = 30_000   # ms
 
 

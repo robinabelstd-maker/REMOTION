@@ -29,8 +29,8 @@ TEST_LIMIT = 100        # stop after this many transactions
 
 RETRY_COUNT = 3
 RETRY_WAIT = 5
-MIN_DELAY = 1.5
-MAX_DELAY = 3.0
+MIN_DELAY = 3.0
+MAX_DELAY = 7.0
 PAGE_TIMEOUT = 30_000   # ms
 
 
