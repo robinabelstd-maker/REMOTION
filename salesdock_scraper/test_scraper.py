@@ -1,4 +1,4 @@
-#!C:\Users\robin\AppData\Local\Programs\Python\Python314\python.exe
+#!C:\Users\robin\AppData\Local\Python\pythoncore-3.11-64\python.exe
 """
 TEST RUN — requests + BeautifulSoup, no browser automation.
 Starts at page 140, works backwards, stops after 38 transactions.
