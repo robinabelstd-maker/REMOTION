@@ -1,6 +1,7 @@
 #!C:\Users\robin\AppData\Local\Python\pythoncore-3.11-64\python.exe
 """
 TEST RUN — requests + BeautifulSoup, no browser automation.
+List pages via JSON search endpoint; detail pages parsed with BeautifulSoup.
 Starts at page 140, works backwards, stops after 38 transactions.
 Output: Desktop/salesdock_export/test_progress.json
 Run export_test.py afterwards to produce test_export.xlsx.
@@ -18,25 +19,26 @@ import requests
 from bs4 import BeautifulSoup
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-DESKTOP     = Path(os.path.expanduser("~")) / "Desktop"
-EXPORT_DIR  = DESKTOP / "salesdock_export"
+DESKTOP       = Path(os.path.expanduser("~")) / "Desktop"
+EXPORT_DIR    = DESKTOP / "salesdock_export"
 PROGRESS_FILE = EXPORT_DIR / "test_progress.json"
 FAILED_FILE   = EXPORT_DIR / "test_failed.txt"
-COOKIE_FILE   = EXPORT_DIR / "cookie.txt"          # saved so you only paste once
+COOKIE_FILE   = EXPORT_DIR / "cookie.txt"
 
-BASE_URL   = "https://app.salesdock.nl/askwadraat/admin"
-LIST_URL   = f"{BASE_URL}/transactions/view/all"
-DETAIL_URL = f"{BASE_URL}/sales/{{id}}"
+BASE_URL    = "https://app.salesdock.nl/askwadraat/admin"
+SEARCH_URL  = f"{BASE_URL}/transactions/search"   # JSON endpoint
+DETAIL_URL  = f"{BASE_URL}/sales/{{id}}"
 
 START_PAGE = 140
 TEST_LIMIT = 38
 
 RETRY_COUNT = 3
-RETRY_WAIT  = 5    # seconds between retries
-MIN_DELAY   = 3.0  # seconds between requests
+RETRY_WAIT  = 5
+MIN_DELAY   = 3.0
 MAX_DELAY   = 7.0
 
-HEADERS = {
+# Headers for HTML detail pages
+HTML_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -48,6 +50,21 @@ HEADERS = {
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
     "Referer": "https://app.salesdock.nl/",
+}
+
+# Headers for the JSON search endpoint (mimics XHR)
+JSON_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": f"{BASE_URL}/transactions/view/all",
 }
 
 
@@ -104,11 +121,33 @@ def log_failed(transaction_id: str) -> None:
         f.write(f"{transaction_id}\n")
 
 
-# ── HTTP helper ───────────────────────────────────────────────────────────────
-def fetch(session: requests.Session, url: str) -> BeautifulSoup | None:
+# ── HTTP helpers ──────────────────────────────────────────────────────────────
+def fetch_json(session: requests.Session, page: int) -> dict | None:
+    """Fetch one page from the JSON search endpoint."""
+    params = {"new_filter": "true", "q": "", "page": page}
     for attempt in range(1, RETRY_COUNT + 1):
         try:
-            resp = session.get(url, headers=HEADERS, timeout=30)
+            resp = session.get(SEARCH_URL, params=params, headers=JSON_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except ValueError:
+                    print(f"  [WARN] Response is not JSON (got HTML?) — cookie may be expired")
+                    print(f"  First 200 chars: {resp.text[:200]}")
+                    return None
+            print(f"  [RETRY {attempt}/{RETRY_COUNT}] HTTP {resp.status_code}")
+        except requests.RequestException as e:
+            print(f"  [RETRY {attempt}/{RETRY_COUNT}] Request error: {e}")
+        if attempt < RETRY_COUNT:
+            time.sleep(RETRY_WAIT)
+    return None
+
+
+def fetch_html(session: requests.Session, url: str) -> BeautifulSoup | None:
+    """Fetch an HTML detail page and return a BeautifulSoup object."""
+    for attempt in range(1, RETRY_COUNT + 1):
+        try:
+            resp = session.get(url, headers=HTML_HEADERS, timeout=30)
             if resp.status_code == 200:
                 return BeautifulSoup(resp.text, "lxml")
             print(f"  [RETRY {attempt}/{RETRY_COUNT}] HTTP {resp.status_code} for {url}")
@@ -119,58 +158,53 @@ def fetch(session: requests.Session, url: str) -> BeautifulSoup | None:
     return None
 
 
-# ── Parsing: transaction list ─────────────────────────────────────────────────
-def get_transaction_ids(soup: BeautifulSoup) -> list[str]:
+# ── JSON list parsing ─────────────────────────────────────────────────────────
+def extract_ids_from_json(data: dict) -> list[str]:
+    """
+    Pull transaction IDs from the search JSON response.
+    Handles common Laravel pagination shapes:
+      { "data": [ {"id": 123, ...}, ... ], "last_page": N, ... }
+      { "transactions": [ ... ] }
+      [ {"id": 123}, ... ]   (bare array)
+    """
+    rows = []
+
+    if isinstance(data, list):
+        rows = data
+    elif "data" in data:
+        rows = data["data"]
+    else:
+        # Try any key whose value is a list
+        for v in data.values():
+            if isinstance(v, list) and v:
+                rows = v
+                break
+
     ids = []
-    seen = set()
-
-    # Strategy 1: anchor tags linking to /admin/sales/{id}
-    for a in soup.find_all("a", href=re.compile(r"/admin/sales/\d+")):
-        m = re.search(r"/sales/(\d+)", a["href"])
-        if m and m.group(1) not in seen:
-            ids.append(m.group(1))
-            seen.add(m.group(1))
-
-    if ids:
-        return ids
-
-    # Strategy 2: first <td> of each table row contains a bare number
-    for row in soup.select("table tbody tr"):
-        cells = row.find_all("td")
-        if cells:
-            txt = cells[0].get_text(strip=True)
-            if txt.isdigit() and txt not in seen:
-                ids.append(txt)
-                seen.add(txt)
-
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        # Try common id field names
+        for key in ("id", "ID", "transaction_id", "transactie_id"):
+            if key in row:
+                ids.append(str(row[key]))
+                break
     return ids
 
 
-def get_total_pages(soup: BeautifulSoup) -> int:
-    """Read the highest page number from the pagination block."""
-    nums = []
-    for a in soup.select("ul.pagination a, nav a[href*='page=']"):
-        txt = a.get_text(strip=True)
-        if txt.isdigit():
-            nums.append(int(txt))
-        # also check href ?page=N
-        href = a.get("href", "")
-        m = re.search(r"page=(\d+)", href)
-        if m:
-            nums.append(int(m.group(1)))
-    return max(nums) if nums else 1
+def get_last_page(data: dict) -> int:
+    """Read the last page number from the pagination envelope."""
+    for key in ("last_page", "lastPage", "total_pages", "pages"):
+        if key in data and isinstance(data[key], int):
+            return data[key]
+    return 1
 
 
-# ── Parsing: transaction detail ───────────────────────────────────────────────
+# ── Detail page parsing ───────────────────────────────────────────────────────
 def find_field(soup: BeautifulSoup, labels: list[str]) -> str:
-    """
-    Try several HTML patterns to locate a labelled value.
-    Returns the first non-empty match, or "".
-    """
     for label in labels:
         label_lower = label.lower()
 
-        # Pattern 1: <dt>Label</dt><dd>Value</dd>
         for dt in soup.find_all("dt"):
             if label_lower in dt.get_text(strip=True).lower():
                 dd = dt.find_next_sibling("dd")
@@ -179,7 +213,6 @@ def find_field(soup: BeautifulSoup, labels: list[str]) -> str:
                     if val:
                         return val
 
-        # Pattern 2: <th>Label</th><td>Value</td>
         for th in soup.find_all("th"):
             if label_lower in th.get_text(strip=True).lower():
                 td = th.find_next_sibling("td")
@@ -188,7 +221,6 @@ def find_field(soup: BeautifulSoup, labels: list[str]) -> str:
                     if val:
                         return val
 
-        # Pattern 3: <label>Label</label> … sibling text node or <span>/<p>
         for lbl in soup.find_all("label"):
             if label_lower in lbl.get_text(strip=True).lower():
                 for sibling in lbl.next_siblings:
@@ -197,7 +229,6 @@ def find_field(soup: BeautifulSoup, labels: list[str]) -> str:
                         if val:
                             return val
 
-        # Pattern 4: element with data-label attribute
         el = soup.find(attrs={"data-label": re.compile(re.escape(label), re.I)})
         if el:
             val = el.get_text(" ", strip=True)
@@ -257,26 +288,34 @@ def run():
     counter = len(transactions)
     done = False
 
-    for page_num in range(START_PAGE, 0, -1):
+    # Probe page 1 first to get the real last page number
+    print(f"\nProbing page 1 to detect total pages …")
+    probe = fetch_json(session, 1)
+    if probe is None:
+        print("ERROR: Could not reach the search endpoint. Check your cookie.")
+        print(f"Delete {COOKIE_FILE} and re-run to paste a fresh cookie.")
+        sys.exit(1)
+
+    last_page = get_last_page(probe)
+    actual_start = min(START_PAGE, last_page)
+    print(f"Total pages: {last_page}  |  Starting from page: {actual_start}")
+
+    for page_num in range(actual_start, 0, -1):
         if done:
             break
 
-        print(f"\n── Page {page_num} (counting down from {START_PAGE}) ──")
+        print(f"\n── Page {page_num} (counting down to 1) ──")
 
-        url = f"{LIST_URL}?page={page_num}"
-        soup = fetch(session, url)
-        if soup is None:
-            print(f"  [SKIP] Could not load list page {page_num}")
+        data = fetch_json(session, page_num)
+        if data is None:
+            print(f"  [SKIP] Could not load page {page_num}")
             continue
 
-        # Check if we've been redirected to a login page
-        if "login" in (soup.title.string or "").lower() if soup.title else False:
-            print("\nERROR: Session expired or cookie is invalid.")
-            print(f"Delete {COOKIE_FILE} and re-run the script to paste a fresh cookie.")
-            sys.exit(1)
-
-        ids_on_page = get_transaction_ids(soup)
+        ids_on_page = extract_ids_from_json(data)
         print(f"  Found {len(ids_on_page)} transaction IDs on page {page_num}")
+
+        if not ids_on_page:
+            print(f"  [WARN] No IDs found — raw keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
 
         for transaction_id in ids_on_page:
             if counter >= TEST_LIMIT:
@@ -291,10 +330,10 @@ def run():
             time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
             detail_url = DETAIL_URL.format(id=transaction_id)
-            detail_soup = fetch(session, detail_url)
+            detail_soup = fetch_html(session, detail_url)
 
             if detail_soup is None:
-                print(f"  [FAILED] Could not load ID {transaction_id} after {RETRY_COUNT} retries")
+                print(f"  [FAILED] Skipping ID {transaction_id} after {RETRY_COUNT} retries")
                 log_failed(transaction_id)
                 continue
 
