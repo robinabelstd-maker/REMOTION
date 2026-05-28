@@ -20,11 +20,9 @@ echo.
 echo Installing Python packages...
 pip install playwright gspread google-auth openpyxl
 
-:: Install Playwright browsers (Chromium not needed — we use system Chrome)
-:: But we still need Playwright's browser bindings
-echo.
-echo Installing Playwright Chrome driver...
-playwright install chrome
+:: No "playwright install" step needed — the scripts use channel="chrome"
+:: which tells Playwright to use your existing system Chrome installation at:
+::   C:\Program Files\Google\Chrome\Application\chrome.exe
 
 echo.
 echo ============================================
@@ -36,6 +34,7 @@ echo Playwright needs exclusive access to the
 echo Chrome profile.
 echo.
 echo Then run:
-echo   python scraper.py
+echo   python test_scraper.py   (38-transaction test)
+echo   python scraper.py        (full run)
 echo ============================================
 pause

@@ -19,6 +19,7 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 
 # ── Configuration ────────────────────────────────────────────────────────────
 CHROME_PROFILE_PATH = r"C:\Users\robin\AppData\Local\Google\Chrome\User Data"
+CHROME_EXE_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 DESKTOP = Path(os.path.expanduser("~")) / "Desktop"
 EXPORT_DIR = DESKTOP / "salesdock_export"
 PROGRESS_FILE = EXPORT_DIR / "progress.json"
@@ -229,6 +230,11 @@ async def scrape_detail(page, transaction_id: str, page_num: int, counter: int) 
 async def run():
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
+    if not Path(CHROME_EXE_PATH).exists():
+        print(f"ERROR: Chrome not found at {CHROME_EXE_PATH}")
+        print("Update CHROME_EXE_PATH in this script to match your Chrome installation.")
+        return
+
     # Load previous progress
     progress = load_progress()
     scraped_ids: set = set(progress.get("scraped_ids", []))
@@ -240,7 +246,7 @@ async def run():
         # Use the existing Chrome profile — launch as persistent context
         context = await pw.chromium.launch_persistent_context(
             user_data_dir=CHROME_PROFILE_PATH,
-            channel="chrome",
+            channel="chrome",           # uses system Chrome at CHROME_EXE_PATH, no Playwright install needed
             headless=False,
             args=[
                 "--disable-blink-features=AutomationControlled",
